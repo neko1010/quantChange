@@ -158,6 +158,11 @@ results.beast.na = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), de
 plot(results.beast.na, interactive = F) ## missing data leads to higher likelihood of negative slopes, and an extra breakpoint estimated in the trend
 
 ## Parameters 
+results.beast.na.unifPrec = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), deltat = "3 months", precPriorType = 'uniform') 
+plot(results.beast.na.unifPrec, interactive = F) 
+
+results.beast.na.compPrec = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), deltat = "3 months", precPriorType = 'componentwise') 
+plot(results.beast.na.compPrec, interactive = F) 
 
 ## BSTS 
 library(CausalImpact)
