@@ -186,3 +186,8 @@ plot(impact.time)
 
 summary(impact)
 summary(impact.time) ## nearly identical results AND includes period of missing data...
+
+
+library(terra)
+ras = rast("Yankee.tif")
+plot(ras)
