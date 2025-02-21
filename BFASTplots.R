@@ -9,6 +9,7 @@ library(gtools)
 
 ras = rast('Yankee.tif')
 plot(ras)
+crs(ras)
 
 ## insert an entire month of NAs for July 2019
 july19 = rast(ras[[1]], vals = NA, names = c('1_1_040029_201907_mesic'))
@@ -18,7 +19,6 @@ july19
 ras = c(ras, july19)
 ras
 ## add time stamps to each
-
 names = names(ras)
 dates = sapply(names, function(name){
   as.Date(paste0(unlist(strsplit(name, "_"))[4],"01"),"%Y%m%d")
@@ -26,9 +26,16 @@ dates = sapply(names, function(name){
 
 ## sort by dates
 dates.sort = order(dates)
+dates.sorted = as.Date(dates[dates.sort])
 ras.sort = ras[[dates.sort]]
+
+terra::time(ras.sort)= dates.sorted
+
+## INSERT dates.sorted info to raster
+
 ## double check times
-time(ras.sort) 
+time(ras.sort)
+
 
 xbfast <- function(data) {  
   mesic <- ts(data, frequency=4, start=2004) 
@@ -51,31 +58,45 @@ xbfast <- function(data) {
   return(c(st_dif,bp,Magni,Timing)) 
 }
 
-
-bfastfun <- function(y) {
-  percNA <- apply(y, 1, FUN=function(x) (sum(is.na(x))/length(x)) )
-  i <- (percNA<0.2)
-  res <- matrix(NA, length(i), 4) #
-  if (sum(i) > 0) {
-    res <- t(apply(y[i,], 1, xbfast))
-  }
-  return(res)
-}
-
-bfast.output <- app(ras.sort, fun=bfastfun)
+#bfast.output <- app(ras.sort, fun=bfastfun)
+bfast.output <- app(ras.sort, fun=xbfast)
 plot(bfast.output)
-plot(ras.sort[[4]], main = "Mesic vegetation proportion Sep 2004", range = c(0, 0.6))
-plot(ras.sort[[64]], main = "Mesic vegetation proportion Sep 2020", range = c(0, 0.6))
 
-max(ras.sort[[64]])
+## not sure why, but all of the above outputs are inverted (both NS and EW) - need to apply the flip() to correct
+plot(flip(ras.sort[[64]]), #main = "Mesic vegetation proportion Sep 2020 flipped", 
+     range = c(0, 0.6), plg = list(title = "proportion"))
+
+parameter <- par(mfrow = c(1,4))
+parameter <- plot(flip(ras.sort[[4]]), main = "Panel A\nMesic vegetation\n proportion Sep 2004", range = c(0, 0.6))
+parameter <- plot(flip(ras.sort[[64]]), main = "Panel A\nMesic vegetation\n proportion Sep 2020", range = c(0, 0.6))
 
 diff <- subset(bfast.output, 1)
 time <- subset(bfast.output, 2)
 magn <- subset(bfast.output, 3)
 magn.time <- subset(bfast.output, 4)
 
-plot(magn, main = "Largest magnitude of change in trend")
-plot(magn.time, main = "Time of largest magnitude of change in trend")
+parameter <- plot(flip(magn), main = "Panel C\nLargest magnitude\n of change in trend")
+
+## substitute dates for indices
+years.vect = c(rep(2004,4), rep(2005,4), rep(2006,4), rep(2007,4), rep(2008,4),rep(2009,4), rep(2010,4),rep(2011,4),
+               rep(2012,4),rep(2013,4),rep(2014,4),rep(2015,4),rep(2017,4),rep(2018,4),rep(2019,4),rep(2020,4))
+#magn.time.dates = subst(magn.time, from = c(1:64), to = as.Date(dates.sorted))
+magn.time.dates = subst(magn.time, from = c(1:64), to = years.vect)
+parameter <- plot(flip(magn.time.dates), main = "Panel D\nTime of largest magnitude\n of change in trend")
+
+### CK's date fix - single plots for each
+#library(tidyverse)
+##dates.sorted <- as.Date(dates[dates.sort])
+##magn.time.dates <- subst(magn.time, from=c(1:64), to=dates.sorted)
+#ggplot(as.data.frame(magn.time.dates, xy=TRUE), 
+#       aes(x=x, y=y, fill=as.Date(lyr.4))) +
+#  geom_raster() +
+#  scale_fill_viridis_c(name = "",
+#                       trans="date") +
+#  labs(title = "Time of largest magnitude of change in trend") +
+#  coord_sf(default_crs = crs(ras)) +
+#  theme_void() +
+#  theme(panel.border = element_rect(color="black", fill=NA))
 
 #writeRaster(diff, filename="season_diff.tif", format="GTiff") ## EMPTY - makes sense - no bp here
 #writeRaster(time, filename="season_diff_time.tif", format="GTiff") ##BORING
