@@ -66,11 +66,6 @@ bfast.output <- app(ras.sort, fun=xbfast)
 ## plot all outputs
 plot(bfast.output)
 
-## not sure why, but all of the above outputs are inverted (both NS and EW) -
-## need to apply the flip() to correct - double check whether this is necessary
-plot(flip(ras.sort[[64]]), #main = "Mesic vegetation proportion Sep 2020 flipped", 
-     range = c(0, 0.6), plg = list(title = "proportion")) ## sanity check
-
 ## a 4 panel plot
 parameter <- par(mfrow = c(1,4))
 ## sep 2004
@@ -144,10 +139,15 @@ data.NAs = data.NAs[order(data.NAs$date),]
 data.ts = ts(data.fill$mesic, frequency = 4)
 data.ts.NA = ts(data.NAs$mesic, frequency = 4)
 
-plot(data.ts)
+plot(data.ts, axes = F)
+axis(1, at = 1:16, labels = years.bfast)
 plot(data.ts.NA)
 
 ## apply the BFAST function
 fit = bfast(data.ts, h = 0.15, season = "dummy")
 
-plot(fit, ANOVA = T)
+years.bfast = c(2004, 2005, 2006, 2007, 2008, 2009, 2010,
+                2011, 2012, 2013, 2014, 2015, 2017, 2018, 2019, 2020)
+
+plot(fit, ANOVA = T, main = "BFAST output", xaxt = "n")
+axis(1, at = 1:16, labels = years.bfast)
