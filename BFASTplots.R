@@ -2,11 +2,17 @@
 library(bfast)
 library(terra)
 library(gtools)
+library(sf)
+
+setwd("~/BSU/MRRMAid/lab/quantChange/")
 
 ## import .tif as raster
 ras = rast('Yankee.tif')
 plot(ras)
 crs(ras)
+
+## import .shp for restoration AOI
+shp = st_read('yankee.shp')
 
 ## insert an entire month of NAs for July 2019
 july19 = rast(ras[[1]], vals = NA, names = c('1_1_040029_201907_mesic'))
@@ -68,10 +74,11 @@ plot(flip(ras.sort[[64]]), #main = "Mesic vegetation proportion Sep 2020 flipped
 ## a 4 panel plot
 parameter <- par(mfrow = c(1,4))
 ## sep 2004
-parameter <- plot(flip(ras.sort[[4]]), main = "Panel A\nMesic vegetation\n proportion Sep 2004", range = c(0, 0.6))
+parameter <- plot(ras.sort[[4]], main = "Panel A\nMesic vegetation\n proportion Sep 2004", range = c(0, 0.6))
+plot(st_geometry(shp), border = "red", add = T, lwd = 2)
 ## sep 2020
-parameter <- plot(flip(ras.sort[[64]]), main = "Panel B\nMesic vegetation\n proportion Sep 2020", range = c(0, 0.6))
-
+parameter <- plot(ras.sort[[64]], main = "Panel B\nMesic vegetation\n proportion Sep 2020", range = c(0, 0.6))
+plot(st_geometry(shp), border = "red", add = T, lwd = 2)
 ## Individual BFAST outputs
 diff <- subset(bfast.output, 1)
 time <- subset(bfast.output, 2)
@@ -79,14 +86,15 @@ magn <- subset(bfast.output, 3)
 magn.time <- subset(bfast.output, 4)
 
 ## Magnitude change
-parameter <- plot(flip(magn), main = "Panel C\nLargest magnitude\n of change in trend")
-
+parameter <- plot(magn, main = "Panel C\nLargest magnitude\n of change in trend")
+plot(st_geometry(shp), border = "red", add = T, lwd = 2)
 ## substitute dates for indices
 years.vect = c(rep(2004,4), rep(2005,4), rep(2006,4), rep(2007,4), rep(2008,4),rep(2009,4), rep(2010,4),rep(2011,4),
                rep(2012,4),rep(2013,4),rep(2014,4),rep(2015,4),rep(2017,4),rep(2018,4),rep(2019,4),rep(2020,4))
 ## Time of greatest magnitude change
 magn.time.dates = subst(magn.time, from = c(1:64), to = years.vect)
-parameter <- plot(flip(magn.time.dates), main = "Panel D\nTime of largest magnitude\n of change in trend")
+parameter <- plot(magn.time.dates, main = "Panel D\nTime of largest magnitude\n of change in trend")
+plot(st_geometry(shp), border = "red", add = T, lwd = 2)
 
 ############ Images reduced to a single value for comparison ###################
 
