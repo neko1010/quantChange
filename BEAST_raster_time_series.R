@@ -1,8 +1,10 @@
 ###################################
 # Applying BEAST to a raster time series
 # Author: Carolyn Koehn
-# Last modified: 3/4/25
+# Last modified: 3/6/25
 ###################################
+
+set.seed(101)
 
 # load packages
 library(terra)
@@ -160,21 +162,21 @@ plot(rast(cpMagn_trend,
      main = "Panel A\nLargest magnitude\nof change in trend",
      mar = c(2.6, 4.6, 3.6, 6.6),
      col = viridisLite::viridis(50))
-plot(st_geometry(aoi), border="red", lwd = 2, add=T)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
 plot(rast(cpMagnProb_trend,
           crs=crs(ras.sort),
           extent=ext(ras.sort)),
      main = "Panel B\nProbability of largest\nchange magnitude in trend",
      mar = c(2.6, 4.6, 3.6, 6.6),
      col = viridisLite::viridis(50))
-plot(st_geometry(aoi), border="red", lwd = 2, add=T)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
 plot(rast(cpMagnTime_trend,
           crs=crs(ras.sort),
           extent=ext(ras.sort)),
      main = "Panel C\nTime of largest change\nmagnitude in trend",
      mar = c(2.6, 4.6, 3.6, 6.6),
      col = viridisLite::viridis(50))
-plot(st_geometry(aoi), border="red", lwd = 2, add=T)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
 
 ## Trend component from all pixels
 par(mfrow=c(1,1))
