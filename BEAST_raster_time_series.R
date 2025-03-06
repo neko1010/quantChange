@@ -4,8 +4,6 @@
 # Last modified: 3/6/25
 ###################################
 
-set.seed(101)
-
 # load packages
 library(terra)
 library(sf)
@@ -43,8 +41,10 @@ beast.output <- beast123(Y = array.input,
                                 time = time(ras.sort), # since time series is irregular, provide times here
                                 startTime = time(ras.sort)[1],
                                 deltaTime = "1 month", # time between data points
-                                period = "1 year"), # length of seasonal period (we expect a yearly cycle) 
+                                period = "1 year", # length of seasonal period (we expect a yearly cycle) 
+                                sorder.minmax = 1), # we expect only one annual max/min
                          season = 'harmonic',
+                         mcmc = list(seed = 101), # set seed for +/- reproducible results
                          extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
 
 #############################################
@@ -54,6 +54,9 @@ beast.output <- beast123(Y = array.input,
 ## BEAST filled in our irregular time series, adding NAs for missing months
 ## Here is an example of the time series generated for the top left pixel:
 print(beast.output$data[1,1,])
+
+## see summary plot for one pixel
+plot(beast.output, index = c(15, 7))
 
 # Measures of model fit by pixel
 # R2
