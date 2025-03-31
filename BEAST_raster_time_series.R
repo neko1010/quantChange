@@ -35,12 +35,26 @@ array.input <- as.array(ras.sort)
 
 ##############################################
 # apply BEAST to 3D time series
+# "pseudo-BFAST" method
 beast.output <- beast123(Y = array.input,
                          metadata = 
                            list(whichDimIsTime = 3, # the layer dimension (3rd dimension) corresponds to time
                                 startTime = as.Date('2004-1-1'),
                                 deltaTime = "3 months", # time between data points
                                 period = "1 year"), # length of seasonal period (we expect a yearly cycle)
+                         season = 'harmonic',
+                         mcmc = list(seed = 101), # set seed for +/- reproducible results
+                         extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
+
+# irregular time series method
+beast.output.irreg <- beast123(Y = array.input,
+                         metadata = 
+                           list(whichDimIsTime = 3, # the layer dimension (3rd dimension) corresponds to time
+                                time = time(ras.sort), # since time series is irregular, provide times here
+                                startTime = time(ras.sort)[1],
+                                deltaTime = "1 month", # time between data points
+                                period = "1 year", # length of seasonal period (we expect a yearly cycle) 
+                                sorder.minmax = 1), # we expect only one annual max/min
                          season = 'harmonic',
                          mcmc = list(seed = 101), # set seed for +/- reproducible results
                          extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
