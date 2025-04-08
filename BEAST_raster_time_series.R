@@ -1,7 +1,7 @@
 ###################################
 # Applying BEAST to a raster time series
 # Author: Carolyn Koehn
-# Last modified: 3/6/25
+# Last modified: 4/8/25
 ###################################
 
 # load packages
@@ -54,7 +54,7 @@ beast.output.irreg <- beast123(Y = array.input,
                                 startTime = time(ras.sort)[1],
                                 deltaTime = "1 month", # time between data points
                                 period = "1 year", # length of seasonal period (we expect a yearly cycle) 
-                                sorder.minmax = 1), # we expect only one annual max/min
+                                sorder.minmax = 2), # we expect only one annual max/min
                          season = 'harmonic',
                          mcmc = list(seed = 101), # set seed for +/- reproducible results
                          extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
@@ -96,23 +96,23 @@ plot(rast(beast.output$season$ncp_median,
      main = "Median number of\nseasonal change points")
 
 ## Probability of the median number of change points
-ncpPr_trend_median <- matrix(data=NA, 
-                             nrow=nrow(beast.output$trend$ncp_median), 
-                             ncol=ncol(beast.output$trend$ncp_median))
-for(i in 1:nrow(beast.output$trend$ncp_median)) {
-  for(j in 1:ncol(beast.output$trend$ncp_median)) {
-    ncpPr_trend_median[i,j] <- beast.output$trend$ncpPr[i, j, (beast.output$trend$ncp_median[i,j]+1)]
-  }
+get_Pr_for_ncp <- function(ncpPr, ncp) {
+  return(ncp.Pr[[1]][ncp+1])
 }
 
-ncpPr_season_median <- matrix(data=NA, 
-                             nrow=nrow(beast.output$season$ncp_median), 
-                             ncol=ncol(beast.output$season$ncp_median))
-for(i in 1:nrow(beast.output$season$ncp_median)) {
-  for(j in 1:ncol(beast.output$season$ncp_median)) {
-    ncpPr_season_median[i,j] <- beast.output$season$ncpPr[i, j, (beast.output$season$ncp_median[i,j]+1)]
-  }
-}
+ncpPr_trend_median <- matrix(data = mapply(FUN = get_Pr_for_ncp,
+                                           apply(beast.output$trend$ncpPr, MARGIN=c(1,2), list),
+                                           beast.output$trend$ncp_median),
+                             nrow = nrow(beast.output$trend$ncp_median),
+                             ncol = ncol(beast.output$trend$ncp_median),
+                             byrow = FALSE)
+
+ncpPr_season_median <- matrix(data = mapply(FUN = get_Pr_for_ncp,
+                                           apply(beast.output$season$ncpPr, MARGIN=c(1,2), list),
+                                           beast.output$season$ncp_median),
+                             nrow = nrow(beast.output$season$ncp_median),
+                             ncol = ncol(beast.output$season$ncp_median),
+                             byrow = FALSE)
   
 par(mfrow = c(1,2))
 plot(rast(ncpPr_trend_median,
@@ -125,6 +125,10 @@ plot(rast(ncpPr_season_median,
      main = "Probability of\nmedian number of\nseasonal change points")
 
 ## Largest magnitude of change in trend
+get_largest_magn_change_stats <- function(cpAbruptChange, ncp, cpPr, cp) {
+  
+}
+
 cpMagn_trend <- matrix(data=NA, 
                        nrow=nrow(beast.output$trend$cpAbruptChange), 
                        ncol=ncol(beast.output$trend$cpAbruptChange))
