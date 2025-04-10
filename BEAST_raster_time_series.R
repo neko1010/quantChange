@@ -1,7 +1,7 @@
 ###################################
 # Applying BEAST to a raster time series
 # Author: Carolyn Koehn
-# Last modified: 3/6/25
+# Last modified: 4/8/25
 ###################################
 
 # load packages
@@ -35,14 +35,26 @@ array.input <- as.array(ras.sort)
 
 ##############################################
 # apply BEAST to 3D time series
+# "pseudo-BFAST" method
 beast.output <- beast123(Y = array.input,
+                         metadata = 
+                           list(whichDimIsTime = 3, # the layer dimension (3rd dimension) corresponds to time
+                                startTime = as.Date('2004-1-1'),
+                                deltaTime = "3 months", # time between data points
+                                period = "1 year"), # length of seasonal period (we expect a yearly cycle)
+                         season = 'harmonic',
+                         mcmc = list(seed = 101), # set seed for +/- reproducible results
+                         extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
+
+# irregular time series method
+beast.output.irreg <- beast123(Y = array.input,
                          metadata = 
                            list(whichDimIsTime = 3, # the layer dimension (3rd dimension) corresponds to time
                                 time = time(ras.sort), # since time series is irregular, provide times here
                                 startTime = time(ras.sort)[1],
                                 deltaTime = "1 month", # time between data points
                                 period = "1 year", # length of seasonal period (we expect a yearly cycle) 
-                                sorder.minmax = 1), # we expect only one annual max/min
+                                sorder.minmax = 2), # we expect only one annual max/min
                          season = 'harmonic',
                          mcmc = list(seed = 101), # set seed for +/- reproducible results
                          extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
@@ -84,23 +96,23 @@ plot(rast(beast.output$season$ncp_median,
      main = "Median number of\nseasonal change points")
 
 ## Probability of the median number of change points
-ncpPr_trend_median <- matrix(data=NA, 
-                             nrow=nrow(beast.output$trend$ncp_median), 
-                             ncol=ncol(beast.output$trend$ncp_median))
-for(i in 1:nrow(beast.output$trend$ncp_median)) {
-  for(j in 1:ncol(beast.output$trend$ncp_median)) {
-    ncpPr_trend_median[i,j] <- beast.output$trend$ncpPr[i, j, (beast.output$trend$ncp_median[i,j]+1)]
-  }
+get_Pr_for_ncp <- function(ncpPr, ncp) {
+  return(ncp.Pr[[1]][ncp+1])
 }
 
-ncpPr_season_median <- matrix(data=NA, 
-                             nrow=nrow(beast.output$season$ncp_median), 
-                             ncol=ncol(beast.output$season$ncp_median))
-for(i in 1:nrow(beast.output$season$ncp_median)) {
-  for(j in 1:ncol(beast.output$season$ncp_median)) {
-    ncpPr_season_median[i,j] <- beast.output$season$ncpPr[i, j, (beast.output$season$ncp_median[i,j]+1)]
-  }
-}
+ncpPr_trend_median <- matrix(data = mapply(FUN = get_Pr_for_ncp,
+                                           apply(beast.output$trend$ncpPr, MARGIN=c(1,2), list),
+                                           beast.output$trend$ncp_median),
+                             nrow = nrow(beast.output$trend$ncp_median),
+                             ncol = ncol(beast.output$trend$ncp_median),
+                             byrow = FALSE)
+
+ncpPr_season_median <- matrix(data = mapply(FUN = get_Pr_for_ncp,
+                                           apply(beast.output$season$ncpPr, MARGIN=c(1,2), list),
+                                           beast.output$season$ncp_median),
+                             nrow = nrow(beast.output$season$ncp_median),
+                             ncol = ncol(beast.output$season$ncp_median),
+                             byrow = FALSE)
   
 par(mfrow = c(1,2))
 plot(rast(ncpPr_trend_median,
@@ -112,50 +124,44 @@ plot(rast(ncpPr_season_median,
           extent=ext(ras.sort)),
      main = "Probability of\nmedian number of\nseasonal change points")
 
-## Largest magnitude of change in trend
-cpMagn_trend <- matrix(data=NA, 
-                       nrow=nrow(beast.output$trend$cpAbruptChange), 
-                       ncol=ncol(beast.output$trend$cpAbruptChange))
-for(i in 1:nrow(beast.output$trend$cpAbruptChange)) {
-  for(j in 1:ncol(beast.output$trend$cpAbruptChange)) {
-    if(beast.output$trend$ncp_median[i, j] > 0) {
-      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
-      cpMagn_trend[i,j] <- beast.output$trend$cpAbruptChange[i, j, highest_magn_trend]
-    } else {
-      cpMagn_trend[i,j] <- NA
-    }
+## Descriptive stats for largest magnitude of change in trend
+get_largest_magn_change_stats <- function(cpAbruptChange, ncp, cpPr, cp) {
+  stats.to.return <- c(cpMagn = NA,
+                       cpMagnPr = NA,
+                       cpMagnTime = NA)
+  if(ncp > 0) {
+    highest.magn.trend <- which.max(abs(cpAbruptChange[[1]]))
+    
+    stats.to.return["cpMagn"] <- cpAbruptChange[[1]][highest.magn.trend]
+    stats.to.return["cpMagnPr"] <- cpPr[[1]][highest.magn.trend]
+    stats.to.return["cpMagnTime"] <- cp[[1]][highest.magn.trend]
   }
+  return(stats.to.return)
 }
 
-### Probability of largest change
-cpMagnProb_trend <- matrix(data=NA, 
-                           nrow=nrow(beast.output$trend$cpPr), 
-                           ncol=ncol(beast.output$trend$cpPr))
-for(i in 1:nrow(beast.output$trend$cpPr)) {
-  for(j in 1:ncol(beast.output$trend$cpPr)) {
-    if(beast.output$trend$ncp_median[i, j] > 0) {
-      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
-      cpMagnProb_trend[i,j] <- beast.output$trend$cpPr[i, j, highest_magn_trend]
-    } else {
-      cpMagnProb_trend[i,j] <- NA
-    }
-  }
-}
+largest_magn_trend_change <- mapply(FUN = get_largest_magn_change_stats,
+                 apply(beast.output$trend$cpAbruptChange, MARGIN = c(1,2), list),
+                 beast.output$trend$ncp_median,
+                 apply(beast.output$trend$cpPr, MARGIN = c(1,2), list),
+                 apply(beast.output$trend$cp, MARGIN = c(1,2), list))
 
-### Time of largest magnitude of change in trend
-cpMagnTime_trend <- matrix(data=NA, 
-                           nrow=nrow(beast.output$trend$cp), 
-                           ncol=ncol(beast.output$trend$cp))
-for(i in 1:nrow(beast.output$trend$cp)) {
-  for(j in 1:ncol(beast.output$trend$cp)) {
-    if(beast.output$trend$ncp_median[i, j] > 0) {
-      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
-      cpMagnTime_trend[i,j] <- beast.output$trend$cp[i, j, highest_magn_trend]
-    } else {
-      cpMagnProb_trend[i,j] <- NA
-    }
-  }
-}
+### Magnitude of largest trend change
+cpMagn_trend <- matrix(data = largest_magn_trend_change["cpMagn",],
+                       nrow = nrow(beast.output$trend$cpAbruptChange),
+                       ncol = ncol(beast.output$trend$cpAbruptChange),
+                       byrow = FALSE)
+
+### Probability of largest trend change
+cpMagnProb_trend <- matrix(data = largest_magn_trend_change["cpMagnPr",],
+                       nrow = nrow(beast.output$trend$cpAbruptChange),
+                       ncol = ncol(beast.output$trend$cpAbruptChange),
+                       byrow = FALSE)
+
+### Time of largest trend change
+cpMagnTime_trend <- matrix(data = largest_magn_trend_change["cpMagnTime",],
+                       nrow = nrow(beast.output$trend$cpAbruptChange),
+                       ncol = ncol(beast.output$trend$cpAbruptChange),
+                       byrow = FALSE)
 
 ### Largest magnitude in trend plots
 par(mfrow = c(1,3))
@@ -189,61 +195,40 @@ plot(x = beast.output$time,
      ylab = "Time Series Trend",
      type="l", main = "Trend Component for all Pixels",
      ylim = c(0,0.8), col="gray80") # y-limits should be adjusted for your results
-for(i in 1:nrow(beast.output$trend$Y)) {
-  for(j in 1:ncol(beast.output$trend$Y)) {
-    lines(x = beast.output$time,
-          y = beast.output$trend$Y[i,j,], 
-          col="gray80")
-  }
-}
+apply(beast.output$trend$Y,
+      MARGIN = c(1,2),
+      function(y) {
+        lines(x = beast.output$time,
+              y = y, 
+              col="gray80")
+        return()
+      })
 
 
+## Largest seasonal change magnitude
+largest_magn_season_change <- mapply(FUN = get_largest_magn_change_stats,
+                                    apply(beast.output$season$cpAbruptChange, MARGIN = c(1,2), list),
+                                    beast.output$season$ncp_median,
+                                    apply(beast.output$season$cpPr, MARGIN = c(1,2), list),
+                                    apply(beast.output$season$cp, MARGIN = c(1,2), list))
 
+### Magnitude of largest seasonal change
+cpMagn_season <- matrix(data = largest_magn_season_change["cpMagn",],
+                       nrow = nrow(beast.output$season$cpAbruptChange),
+                       ncol = ncol(beast.output$season$cpAbruptChange),
+                       byrow = FALSE)
 
-## Largest magnitude of change in seasonal
-cpMagn_season <- matrix(data=NA, 
-                       nrow=nrow(beast.output$season$cpAbruptChange), 
-                       ncol=ncol(beast.output$season$cpAbruptChange))
-for(i in 1:nrow(beast.output$season$cpAbruptChange)) {
-  for(j in 1:ncol(beast.output$season$cpAbruptChange)) {
-    if(beast.output$season$ncp_median[i, j] > 0) {
-      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
-      cpMagn_season[i,j] <- beast.output$season$cpAbruptChange[i, j, highest_magn_season]
-    } else {
-      cpMagn_season[i,j] <- NA
-    }
-  }
-}
+### Probability of largest seasonal change
+cpMagnProb_season <- matrix(data = largest_magn_season_change["cpMagnPr",],
+                           nrow = nrow(beast.output$season$cpAbruptChange),
+                           ncol = ncol(beast.output$season$cpAbruptChange),
+                           byrow = FALSE)
 
-### Probability of largest change
-cpMagnProb_season <- matrix(data=NA, 
-                           nrow=nrow(beast.output$season$cpPr), 
-                           ncol=ncol(beast.output$season$cpPr))
-for(i in 1:nrow(beast.output$season$cpPr)) {
-  for(j in 1:ncol(beast.output$season$cpPr)) {
-    if(beast.output$season$ncp_median[i, j] > 0) {
-      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
-      cpMagnProb_season[i,j] <- beast.output$season$cpPr[i, j, highest_magn_season]
-    } else {
-      cpMagnProb_season[i,j] <- NA
-    }
-  }
-}
-
-### Time of largest magnitude of change in season
-cpMagnTime_season <- matrix(data=NA, 
-                           nrow=nrow(beast.output$season$cp), 
-                           ncol=ncol(beast.output$season$cp))
-for(i in 1:nrow(beast.output$season$cp)) {
-  for(j in 1:ncol(beast.output$season$cp)) {
-    if(beast.output$season$ncp_median[i, j] > 0) {
-      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
-      cpMagnTime_season[i,j] <- beast.output$season$cp[i, j, highest_magn_season]
-    } else {
-      cpMagnProb_season[i,j] <- NA
-    }
-  }
-}
+### Time of largest seasonal change
+cpMagnTime_season <- matrix(data = largest_magn_season_change["cpMagnTime",],
+                           nrow = nrow(beast.output$season$cpAbruptChange),
+                           ncol = ncol(beast.output$season$cpAbruptChange),
+                           byrow = FALSE)
 
 ### Largest magnitude in season plots
 par(mfrow = c(1,3))
@@ -268,10 +253,11 @@ plot(x = beast.output$time,
      ylab = "Time Series Seasonal",
      type="l", main = "Seasonal Component for all Pixels",
      ylim = c(-0.6,0.6), col="gray80") # y-limits should be adjusted for your results
-for(i in 1:nrow(beast.output$season$Y)) {
-  for(j in 1:ncol(beast.output$season$Y)) {
-    lines(x = beast.output$time,
-          y = beast.output$season$Y[i,j,], 
-          col="gray80")
-  }
-}
+apply(beast.output$season$Y,
+      MARGIN = c(1,2),
+      function(y) {
+        lines(x = beast.output$time,
+              y = y, 
+              col="gray80")
+        return()
+      })
