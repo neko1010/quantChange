@@ -1,0 +1,892 @@
+---
+title: "quantChange"
+output: html_document
+date: "2025-04-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+** All code and output for manuscript titled "" **
+
+TO DO: 
+1. refactor for efficiency where we can
+2. edit style for consistency
+3. comments to reference figure numbers in the paper
+
+BFAST
+
+```{r BFAST reduced, echo = FALSE}
+library(bfast)
+
+## read the data
+data = read.csv('yankee.csv')
+
+## Insert a row for July 2019
+data[nrow(data) +1,] = c("July 1, 2019", NA)
+
+## sort the df
+data = data[order(as.Date(data$system.time_start, format = "%b %e, %Y")),]
+rownames(data) = 1:nrow(data)
+
+## cast to numeric dtype
+data$mesic = as.numeric(data$mesic)
+
+## function to interpolate with vals from same month in preceding and following years
+replace_na_with_mean <- function(df) {
+  for (i in 1:ncol(df)) {
+    na_indices <- which(is.na(df[, i]))
+    for (j in na_indices) {
+      if (j == 1) {
+        df[j, i] <- df[j + 4, i]
+      } else if (j == nrow(df)) {
+        df[j, i] <- df[j - 4, i]
+      } else {
+        df[j, i] <- mean(c(df[j - 4, i], df[j + 4, i]))
+      }
+    }
+  }
+  return(df)
+}
+
+## apply the interpolation function to fill NAs
+data.fill = replace_na_with_mean(data)
+
+## create a time series object
+data.ts = ts(data.fill$mesic, frequency = 4)
+
+## Plot the time series
+plot(data.ts)
+
+## apply the BFAST function
+fit = bfast(data.ts, h = 0.15, season = "harmonic")
+
+## test the sensitivity to the prop of observations used to detect breakpoint; < 0.5
+fit.05 = bfast(data.ts, h = 0.05, season = "harmonic")
+fit.25 = bfast(data.ts, h = 0.25, season = "harmonic")
+fit.35 = bfast(data.ts, h = 0.35, season = "harmonic")
+fit.45 = bfast(data.ts, h = 0.45, season = "harmonic")
+
+## plot the output 
+years.bfast = c(2004, 2005, 2006, 2007, 2008, 2009, 2010,
+                2011, 2012, 2013, 2014, 2015, 2017, 2018, 2019, 2020)
+
+plot(fit, ANOVA = T, main = "BFAST output", xaxt = "n") ## OMIT INDICES SOMEHOW
+axis(1, at = 1:16, labels = years.bfast)
+```
+
+BFAST pixels
+
+```{r BFAST pixels, echo=FALSE}
+library(terra)
+library(gtools)
+library(sf)
+
+## import .tif as raster
+ras = rast('Yankee.tif')
+plot(ras)
+crs(ras)
+
+## import .shp for restoration AOI
+shp = st_read('yankee.shp')
+
+## insert an entire month of NAs for July 2019
+july19 = rast(ras[[1]], vals = NA, names = c('1_1_040029_201907_mesic'))
+july19
+
+## add this empty rast to the full stack
+ras = c(ras, july19)
+ras
+
+## add time stamps to each
+names = names(ras)
+dates = sapply(names, function(name){
+  as.Date(paste0(unlist(strsplit(name, "_"))[4],"01"),"%Y%m%d")
+})
+
+## sort by dates
+dates.sort = order(dates)
+dates.sorted = as.Date(dates[dates.sort])
+ras.sort = ras[[dates.sort]]
+
+## apply the sorted dates to the 'time' property of the raster
+terra::time(ras.sort)= dates.sorted
+
+## double check times
+time(ras.sort)
+
+## Function to apply the bfast function and return outputs of interest
+xbfast <- function(data) {  
+  mesic <- ts(data, frequency=4, start=2004) 
+  result <- bfast(mesic, season="harmonic", decomp = 'stlplus')#, max.iter=2, breaks=1)
+  niter <- length(result$output)
+  out <- result$output[[niter]]
+  bp <- out$Wt.bp #breakpoint of the seasonality component
+  st <- out$St #the seasonality component
+  st_a <- st[1:bp] #seasonality until the breakpoint 
+  st_b <- st[bp:64] #hard coded end-point 
+  st_amin <- min(st_a)
+  st_amax <- max(st_a)
+  st_bmin <- min(st_b)
+  st_bmax <- max(st_b)
+  st_adif <- st_amax - st_amin
+  st_bdif <- st_bmax - st_bmin
+  st_dif <- st_bdif - st_adif
+  Magni<-result$Magnitude #magnitude of the biggest change detected in the trend component
+  Timing<-result$Time #timing of the biggest change detected in the trend component
+  return(c(st_dif,bp,Magni,Timing)) 
+}
+
+## apply bfast to every pixel using app()
+bfast.output <- app(ras.sort, fun=xbfast)
+## plot all outputs
+plot(bfast.output)
+
+## a 4 panel plot
+parameter <- par(mfrow = c(1,4))
+## sep 2004
+#parameter <- plot(ras.sort[[4]], main = "Panel A\nMesic vegetation\n proportion Sep 2004", range = c(0, 0.6))
+parameter <- plot(ras.sort[[4]], main = "A", range = c(0, 0.6))
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+## sep 2020
+#parameter <- plot(ras.sort[[64]], main = "Panel B\nMesic vegetation\n proportion Sep 2020", range = c(0, 0.6))
+parameter <- plot(ras.sort[[64]], main = "B", range = c(0, 0.6))
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+## Individual BFAST outputs
+diff <- subset(bfast.output, 1)
+time <- subset(bfast.output, 2)
+magn <- subset(bfast.output, 3)
+magn.time <- subset(bfast.output, 4)
+
+## Magnitude change
+#parameter <- plot(magn, main = "Panel C\nLargest magnitude\n of change in trend")
+parameter <- plot(magn, main = "C")
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+## substitute dates for indices
+years.vect = c(rep(2004,4), rep(2005,4), rep(2006,4), rep(2007,4), rep(2008,4),rep(2009,4), rep(2010,4),rep(2011,4),
+               rep(2012,4),rep(2013,4),rep(2014,4),rep(2015,4),rep(2017,4),rep(2018,4),rep(2019,4),rep(2020,4))
+## Time of greatest magnitude changei
+magn.time.dates = subst(magn.time, from = c(1:64), to = years.vect)
+#parameter <- plot(magn.time.dates, main = "Panel D\nTime of largest magnitude\n of change in trend")
+parameter <- plot(magn.time.dates, main = "D")
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+```
+
+BCP plots
+
+``` {r BCP reduced, echo = FALSE}
+#install.packages('bcp') 
+library(bcp)
+
+## include a 'year' variable
+data.fill$year = as.numeric(format(as.Date(data.fill$system.time_start, format = "%b %e, %Y"), "%Y"))
+
+## univariate
+results.bcp = bcp(data.fill$mesic)
+plot(results.bcp,main = "BCP output - Mesic probabilities of change",xlab = "Date", xaxlab = data.fill$year )
+
+summary(results.bcp)
+
+## Multivariate - use PDSI as a predictor with time
+
+## data with drought index predictor
+pdsi = read.csv('pdsi_Yankee.csv')
+
+## remove 2016 to have corresponding values with the time series
+pdsi$year = as.numeric(format(as.Date(pdsi$system.time_start, format = "%b %e, %Y"), "%Y"))
+pdsi.no2016 = subset(pdsi, year != 2016)
+
+data.multiv = cbind(data.fill, pdsi.no2016$pdsi)
+results.bcp.multiv = bcp(data.multiv$mesic, data.multiv$`pdsi.no2016$pdsi`)
+plot(results.bcp.multiv,main = "BCP output - Mesic probabilities of change - Multivariate",xlab = "Date", xaxlab = data.fill$year )
+
+summary(results.bcp.multiv)
+
+```
+BCP pixels
+
+```{r BCP pixels}
+
+# convert to array
+array.input <- as.array(ras.sort)
+#array.input
+array.input[,,58] #view any month in the time series to verify, in this case the NAs for July 2019
+#now we have an array with matching dimensions of the data we want to apply
+#still need to impute data for NA values
+
+# Function to impute missing values in a time series. Using the mean of the same month in the previous and following year
+impute_time_series_by_year <- function(ts) {
+  # Find indices of missing values in the time series
+  na_idx <- which(is.na(ts))
+  
+  for (i in na_idx) {
+    # Determine the indices corresponding to the same month in the previous and next year.
+    # (4 months per year so shift by 4)
+    i_prev <- i - 4
+    i_next <- i + 4
+    
+    values_to_avg <- c()
+    
+    # Check if the previous year index is within bounds and not NA.
+    if (i_prev >= 1 && !is.na(ts[i_prev])) {
+      values_to_avg <- c(values_to_avg, ts[i_prev])
+    }
+    
+    # Check if the next year index is within bounds and not NA.
+    if (i_next <= length(ts) && !is.na(ts[i_next])) {
+      values_to_avg <- c(values_to_avg, ts[i_next])
+    }
+    
+    # If we have at least one valid neighbor, compute the mean.
+    if (length(values_to_avg) > 0) {
+      ts[i] <- mean(values_to_avg)
+    }
+    # Otherwise, the NA remains.
+  }
+  
+  return(ts)
+}
+
+# Loop through each pixel in the spatial grid and apply the imputation
+n_rows <- dim(array.input)[1]
+n_cols <- dim(array.input)[2]
+
+for (row in 1:n_rows) {
+  for (col in 1:n_cols) {
+    array.input[row, col, ] <- impute_time_series_by_year(array.input[row, col, ])
+  }
+}
+
+# Check if any NAs remain
+#sum(is.na(array.input))  # Should return 0 if all were successfully imputed
+
+#check dimensions
+#dim(array.input)
+
+#get dimensions and number of pixels
+n_rows <- dim(array.input)[1]
+n_cols <- dim(array.input)[2]
+n_pixels <- n_rows * n_cols
+
+##### Producing Raster representing time of greatest probability of change #########
+
+# Preallocate a vector to hold the "time of max posterior probability" for each pixel
+max_prob_time <- numeric(n_pixels)
+
+# Process each pixel: run bcp on its time series and extract the time index with highest posterior probability
+pixel_idx <- 1
+for (row in 1:n_rows) {
+  for (col in 1:n_cols) {
+    ts <- array.input[row, col, ]  # Extract the time series (length 64) for the pixel
+    res <- bcp(ts)                # Run Bayesian Change Point analysis
+    # Extract the time step (index) with the maximum posterior probability
+    max_time <- which.max(res$posterior.prob)
+    max_prob_time[pixel_idx] <- max_time
+    pixel_idx <- pixel_idx + 1
+  }
+}
+
+# Use your raster template "ras" to create the output raster.
+# Since "ras" has 64 bands, we'll use the first band as a template for the output.
+ras_out <- ras[[1]]
+values(ras_out) <- max_prob_time
+names(ras_out) <- "max_posterior_time"
+
+# Create a lookup vector where each index maps to the corresponding year.
+years_lookup <- c(rep(2004, 4),  # indices 1-4
+                  rep(2005, 4),  # indices 5-8
+                  rep(2006, 4),  # indices 9-12
+                  rep(2007, 4),  # indices 13-16
+                  rep(2008, 4),  # indices 17-20
+                  rep(2009, 4),  # indices 21-24
+                  rep(2010, 4),  # indices 25-28
+                  rep(2011, 4),  # indices 29-32
+                  rep(2012, 4),  # indices 33-36
+                  rep(2013, 4),  # indices 37-40
+                  rep(2014, 4),  # indices 41-44
+                  rep(2015, 4),  # indices 45-48
+                  rep(2017, 4),  # indices 49-52 (2016 is missing)
+                  rep(2018, 4),  # indices 53-56
+                  rep(2019, 4),  # indices 57-60
+                  rep(2020, 4))  # indices 61-64
+#length(years_lookup)
+# Replace raster values: Extract the current values (indices 1 to 64) from ras_out.
+current_indices <- values(ras_out)
+# Map each index to its corresponding year using the lookup vector.
+new_year_values <- years_lookup[current_indices]
+# Replace the raster's values.
+values(ras_out) <- new_year_values
+
+# Plot the resulting raster
+#plot(ras_out, main = "Time of Greatest Posterior Probability")
+
+##### Producing Raster representing magnitude of greatest probability of change ##########
+
+# Preallocate a vector to store the maximum posterior probability value for each pixel
+max_prob_value <- numeric(n_pixels)
+
+# Loop through each pixel (each spatial location)
+pixel_idx <- 1
+for (row in 1:n_rows) {
+  for (col in 1:n_cols) {
+    ts <- array.input[row, col, ]  # Extract time series (length = 64) for the pixel
+    res <- bcp(ts)                # Run Bayesian Change Point analysis
+    # Extract the maximum posterior probability value
+    max_val <- max(res$posterior.prob, na.rm = TRUE)
+    max_prob_value[pixel_idx] <- max_val
+    pixel_idx <- pixel_idx + 1
+  }
+}
+
+# Use the existing raster template "ras" (which has 64 bands) 
+# Use one band as a template to create an output single-band raster.
+ras_out2 <- ras[[1]]
+values(ras_out2) <- max_prob_value
+names(ras_out2) <- "max_posterior_value"
+
+# Plot the output raster
+plot(ras_out2, main = "Magnitude of Greatest Posterior Probability")
+
+
+##### Producing Raster representing magnitude of greatest probability of change ##########
+# Preallocate a vector to store the largest magnitude of change in posterior means for each pixel
+max_change_posterior_mean <- numeric(n_pixels)
+
+pixel_idx <- 1
+for (row in 1:n_rows) {
+  for (col in 1:n_cols) {
+    ts <- array.input[row, col, ]   # Extract the 64-point time series for the pixel
+    res <- bcp(ts)                  # Run bcp on the time series
+    
+    # Compute the absolute differences in posterior means between successive time points
+    diff_post_means <- abs(diff(res$posterior.mean))
+    
+    # Find the maximum magnitude of change in posterior means
+    max_diff <- max(diff_post_means, na.rm = TRUE)
+    
+    max_change_posterior_mean[pixel_idx] <- max_diff
+    pixel_idx <- pixel_idx + 1
+  }
+}
+
+# Create an output raster using the existing template 'ras'
+# We use the first band of 'ras' as a template for a new single-band raster.
+ras_out3 <- ras[[1]]
+values(ras_out3) <- max_change_posterior_mean
+names(ras_out3) <- "max_change_posterior_mean"
+
+# Plot the output raster
+#plot(ras_out3, main = "Largest Magnitude of Change in Posterior Means")
+
+
+## a 4 panel plot
+parameterBCP <- par(mfrow = c(1,3))
+## Time of highest likelihood of change
+#parameterBCP <- plot(ras_out, main = "Panel A\nTime of Greatest \nPosterior Probability")
+parameterBCP <- plot(ras_out, main = "A")
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+## sep 2020
+#parameterBCP <- plot(ras_out2, main = "Panel B\nMagnitude of Greatest\nPosterior Probability")
+parameterBCP <- plot(ras_out2, main = "B")
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+
+## Magnitude change
+#parameterBCP <- plot(ras_out3, main = "Panel C\nLargest Magnitude of \nChange in Posterior Means")
+parameterBCP <- plot(ras_out3, main = "C")
+plot(st_geometry(shp), border = "black", add = T, lwd = 2)
+
+```
+
+Bayesian Estimator of Abrupt and Seasonal Trends (BEAST)
+
+``` {r BEAST}
+#install.packages('Rbeast')
+library(Rbeast)
+
+results.beast = beast(data.fill$mesic, start = as.Date('2004-6-1'), deltat = "3 months", dump.ci = T) ##not quite right - missing 2016 data.... 
+plot(results.beast, interactive = F)
+
+## Embrace the NAs! insert some more for 2016
+data.2016 = cbind(c("Jun 1, 2016", "July 1, 2016", "Aug 1, 2016", "Sep 1, 2016"),
+                  c(rep(NA,4)))
+
+colnames(data.2016) = c("system.time_start", "mesic")
+data.NAs = rbind(data, data.2016)
+data.NAs$date = as.Date(data.NAs$system.time_start, format = "%b %e, %Y")
+data.NAs = data.NAs[order(data.NAs$date),]
+data.ts.NA = ts(data.NAs$mesic, frequency = 4, start = 2004)
+
+## missing data
+results.beast.na = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), deltat = "3 months") 
+plot(results.beast.na, interactive = F) ## missing data leads to higher likelihood of negative slopes, and an extra breakpoint estimated in the trend
+
+## Parameters 
+results.beast.na.unifPrec = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), deltat = "3 months", precPriorType = 'uniform') 
+plot(results.beast.na.unifPrec, interactive = F) 
+
+results.beast.na.compPrec = beast(as.numeric(data.ts.NA), start = as.Date('2004-1-1'), deltat = "3 months", precPriorType = 'componentwise') 
+plot(results.beast.na.compPrec, interactive = F, cex.lab = 1) 
+
+```
+
+BEAST pixels
+
+``` {r BEAST pixels}
+
+###################################
+# Applying BEAST to a raster time series
+# Author: Carolyn Koehn
+# Last modified: 3/6/25
+###################################
+
+# load packages
+library(terra)
+library(sf)
+library(Rbeast)
+
+# load data (June-Sep 2004-2020 with data gaps)
+ras <- rast("Yankee.tif")
+
+# get shapefile of area of interest
+aoi <- st_read("yankee.shp") %>%
+  st_transform(crs(ras))
+
+############################################
+# Data Preparation
+
+# add time stamps to raster
+names = names(ras)
+dates = sapply(names, function(name){
+  as.Date(paste0(unlist(strsplit(name, "_"))[4],"01"),"%Y%m%d")
+})
+dates.sort = order(dates)
+ras.sort = ras[[dates.sort]]
+
+# assign times to layers (used in BEAST)
+time(ras.sort) <- as.Date(dates[dates.sort])
+
+# convert to array
+array.input <- as.array(ras.sort)
+
+##############################################
+# apply BEAST to 3D time series
+beast.output <- beast123(Y = array.input,
+                         metadata = 
+                           list(whichDimIsTime = 3, # the layer dimension (3rd dimension) corresponds to time
+                                time = time(ras.sort), # since time series is irregular, provide times here
+                                startTime = time(ras.sort)[1],
+                                deltaTime = "1 month", # time between data points
+                                period = "1 year", # length of seasonal period (we expect a yearly cycle) 
+                                sorder.minmax = 1), # we expect only one annual max/min
+                         season = 'harmonic',
+                         mcmc = list(seed = 101), # set seed for +/- reproducible results
+                         extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
+
+#############################################
+# Reading the output
+
+## Our data had 11 rows and 26 columns in the raster, with 63 time points
+## BEAST filled in our irregular time series, adding NAs for missing months
+## Here is an example of the time series generated for the top left pixel:
+print(beast.output$data[1,1,])
+
+## see summary plot for one pixel
+plot(beast.output, index = c(15, 7))
+
+# Measures of model fit by pixel
+# R2
+par(mfrow=c(1,2))
+plot(rast(beast.output$R2,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)), # convert matrix to raster
+     main = "R2 of model fit")
+# RMSE
+plot(rast(beast.output$RMSE,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "RMSE of model fit")
+
+# Time series descriptions
+## Number of change points (median over all models)
+par(mfrow = c(1,2))
+plot(rast(beast.output$trend$ncp_median,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Median number of\ntrend change points")
+plot(rast(beast.output$season$ncp_median,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Median number of\nseasonal change points")
+
+## Probability of the median number of change points
+ncpPr_trend_median <- matrix(data=NA, 
+                             nrow=nrow(beast.output$trend$ncp_median), 
+                             ncol=ncol(beast.output$trend$ncp_median))
+for(i in 1:nrow(beast.output$trend$ncp_median)) {
+  for(j in 1:ncol(beast.output$trend$ncp_median)) {
+    ncpPr_trend_median[i,j] <- beast.output$trend$ncpPr[i, j, (beast.output$trend$ncp_median[i,j]+1)]
+  }
+}
+
+ncpPr_season_median <- matrix(data=NA, 
+                             nrow=nrow(beast.output$season$ncp_median), 
+                             ncol=ncol(beast.output$season$ncp_median))
+for(i in 1:nrow(beast.output$season$ncp_median)) {
+  for(j in 1:ncol(beast.output$season$ncp_median)) {
+    ncpPr_season_median[i,j] <- beast.output$season$ncpPr[i, j, (beast.output$season$ncp_median[i,j]+1)]
+  }
+}
+  
+par(mfrow = c(1,2))
+plot(rast(ncpPr_trend_median,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Probability of\nmedian number of\ntrend change points")
+plot(rast(ncpPr_season_median,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Probability of\nmedian number of\nseasonal change points")
+
+## Largest magnitude of change in trend
+cpMagn_trend <- matrix(data=NA, 
+                       nrow=nrow(beast.output$trend$cpAbruptChange), 
+                       ncol=ncol(beast.output$trend$cpAbruptChange))
+for(i in 1:nrow(beast.output$trend$cpAbruptChange)) {
+  for(j in 1:ncol(beast.output$trend$cpAbruptChange)) {
+    if(beast.output$trend$ncp_median[i, j] > 0) {
+      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
+      cpMagn_trend[i,j] <- beast.output$trend$cpAbruptChange[i, j, highest_magn_trend]
+    } else {
+      cpMagn_trend[i,j] <- NA
+    }
+  }
+}
+
+### Probability of largest change
+cpMagnProb_trend <- matrix(data=NA, 
+                           nrow=nrow(beast.output$trend$cpPr), 
+                           ncol=ncol(beast.output$trend$cpPr))
+for(i in 1:nrow(beast.output$trend$cpPr)) {
+  for(j in 1:ncol(beast.output$trend$cpPr)) {
+    if(beast.output$trend$ncp_median[i, j] > 0) {
+      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
+      cpMagnProb_trend[i,j] <- beast.output$trend$cpPr[i, j, highest_magn_trend]
+    } else {
+      cpMagnProb_trend[i,j] <- NA
+    }
+  }
+}
+
+### Time of largest magnitude of change in trend
+cpMagnTime_trend <- matrix(data=NA, 
+                           nrow=nrow(beast.output$trend$cp), 
+                           ncol=ncol(beast.output$trend$cp))
+for(i in 1:nrow(beast.output$trend$cp)) {
+  for(j in 1:ncol(beast.output$trend$cp)) {
+    if(beast.output$trend$ncp_median[i, j] > 0) {
+      highest_magn_trend <- which.max(abs(beast.output$trend$cpAbruptChange[i, j, ]))
+      cpMagnTime_trend[i,j] <- beast.output$trend$cp[i, j, highest_magn_trend]
+    } else {
+      cpMagnProb_trend[i,j] <- NA
+    }
+  }
+}
+
+### Largest magnitude in trend plots
+par(mfrow = c(1,3))
+plot(rast(cpMagn_trend,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     #main = "Panel A\nLargest magnitude\nof change in trend",
+     main = "A",
+     mar = c(2.6, 4.6, 3.6, 6.6),
+     col = viridisLite::viridis(50))
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+plot(rast(cpMagnProb_trend,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     #main = "Panel B\nProbability of largest\nchange magnitude in trend",
+     main = "B",
+     mar = c(2.6, 4.6, 3.6, 6.6),
+     col = viridisLite::viridis(50))
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+plot(rast(cpMagnTime_trend,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     #main = "Panel C\nTime of largest change\nmagnitude in trend",
+     main = "C",
+     mar = c(2.6, 4.6, 3.6, 6.6),
+     col = viridisLite::viridis(50))
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+
+## Trend component from all pixels
+par(mfrow=c(1,1))
+plot(x = beast.output$time,
+     xlab = "Date",
+     y = beast.output$trend$Y[1,1,],
+     ylab = "Time Series Trend",
+     type="l", main = "Trend Component for all Pixels",
+     ylim = c(0,0.8), col="gray80") # y-limits should be adjusted for your results
+for(i in 1:nrow(beast.output$trend$Y)) {
+  for(j in 1:ncol(beast.output$trend$Y)) {
+    lines(x = beast.output$time,
+          y = beast.output$trend$Y[i,j,], 
+          col="gray80")
+  }
+}
+
+
+
+
+## Largest magnitude of change in seasonal
+cpMagn_season <- matrix(data=NA, 
+                       nrow=nrow(beast.output$season$cpAbruptChange), 
+                       ncol=ncol(beast.output$season$cpAbruptChange))
+for(i in 1:nrow(beast.output$season$cpAbruptChange)) {
+  for(j in 1:ncol(beast.output$season$cpAbruptChange)) {
+    if(beast.output$season$ncp_median[i, j] > 0) {
+      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
+      cpMagn_season[i,j] <- beast.output$season$cpAbruptChange[i, j, highest_magn_season]
+    } else {
+      cpMagn_season[i,j] <- NA
+    }
+  }
+}
+
+### Probability of largest change
+cpMagnProb_season <- matrix(data=NA, 
+                           nrow=nrow(beast.output$season$cpPr), 
+                           ncol=ncol(beast.output$season$cpPr))
+for(i in 1:nrow(beast.output$season$cpPr)) {
+  for(j in 1:ncol(beast.output$season$cpPr)) {
+    if(beast.output$season$ncp_median[i, j] > 0) {
+      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
+      cpMagnProb_season[i,j] <- beast.output$season$cpPr[i, j, highest_magn_season]
+    } else {
+      cpMagnProb_season[i,j] <- NA
+    }
+  }
+}
+
+### Time of largest magnitude of change in season
+cpMagnTime_season <- matrix(data=NA, 
+                           nrow=nrow(beast.output$season$cp), 
+                           ncol=ncol(beast.output$season$cp))
+for(i in 1:nrow(beast.output$season$cp)) {
+  for(j in 1:ncol(beast.output$season$cp)) {
+    if(beast.output$season$ncp_median[i, j] > 0) {
+      highest_magn_season <- which.max(abs(beast.output$season$cpAbruptChange[i, j, ]))
+      cpMagnTime_season[i,j] <- beast.output$season$cp[i, j, highest_magn_season]
+    } else {
+      cpMagnProb_season[i,j] <- NA
+    }
+  }
+}
+
+### Largest magnitude in season plots
+par(mfrow = c(1,3))
+plot(rast(cpMagn_season,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Largest magnitude\nof change in season")
+plot(rast(cpMagnProb_season,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Probability of\nlargest magnitude\nof change in season")
+plot(rast(cpMagnTime_season,
+          crs=crs(ras.sort),
+          extent=ext(ras.sort)),
+     main = "Time of\nlargest magnitude\nof change in season")
+
+## Seasonal component from all pixels
+par(mfrow=c(1,1))
+plot(x = beast.output$time,
+     xlab = "Date",
+     y = beast.output$season$Y[1,1,],
+     ylab = "Time Series Seasonal",
+     type="l", main = "Seasonal Component for all Pixels",
+     ylim = c(-0.6,0.6), col="gray80") # y-limits should be adjusted for your results
+for(i in 1:nrow(beast.output$season$Y)) {
+  for(j in 1:ncol(beast.output$season$Y)) {
+    lines(x = beast.output$time,
+          y = beast.output$season$Y[i,j,], 
+          col="gray80")
+  }
+}
+
+```
+
+Bayesian Structural Time Series (BSTS)
+
+``` {r BSTS}
+
+## BSTS 
+library(CausalImpact)
+
+## Include PDSI as a predictor
+data.bsts=  cbind(data.fill$mesic, pdsi.no2016$pdsi)
+data.bsts.time =  zoo(cbind(data.fill$mesic, pdsi$pdsi), as.Date(data.fill$system.time_start,format = "%b %e, %Y")) ## includes missing data period
+
+## define pre and post restoration periods
+pre.period = c(1,32)
+post.period = c(33, 64)
+
+## with date
+pre.period.date = as.Date(c("Jun 1, 2004", "Sep 1,2011"), format = "%b %e, %Y")
+post.period.date = as.Date(c("Jun 1, 2012", "Sep 1,2020"), format = "%b %e, %Y")
+
+impact = CausalImpact(data.bsts, pre.period, post.period, model.args = list(nseasons = 4))
+impact.time = CausalImpact(data.bsts.time, pre.period.date, post.period.date, model.args = list(nseasons = 4))
+
+summary(impact)
+summary(impact.time) ## nearly identical results AND includes period of missing data...
+
+plot(impact)
+plot(impact.time)
+
+```
+
+BSTS pixels
+
+```{r BSTS pixels}
+###################################
+# Applying BSTS to a raster time series
+# Author: Juan C Rojas L
+# Last modified: 02/22/25
+###################################
+#The need packages
+library(bfast)
+library(terra)
+library(gtools)
+library(CausalImpact)
+library(terra)
+library(zoo)
+
+#setwd('C:\\Users\\JUANCAMILOROJASL\\Desktop\\BSTS\\quantChange-main\\') #set the location
+ras = rast('Yankee.tif')
+plot(ras)
+dim(ras)
+## insert an entire month of NAs for July 2019
+july19 = rast(ras[[1]], vals = NA, names = c('1_1_040029_201907_mesic'))
+## add this empty rast to the full stack
+ras = c(ras, july19)
+print(ras)
+## add time stamps to each
+names = names(ras)
+dates = sapply(names, function(name){
+  as.Date(paste0(unlist(strsplit(name, "_"))[4],"01"),"%Y%m%d")
+})
+## sort by dates
+dates.sort = order(dates)
+ras.sort = ras[[dates.sort]]
+time(ras.sort) 
+dim(ras.sort)
+##################################################################### 
+############################################################
+##################################################
+### Uploading data.
+data <- as.data.frame(ras.sort)
+pdsi = read.csv('pdsi_Yankee.csv')
+## remove 2016 to have corresponding values with the time series
+pdsi$year = as.numeric(format(as.Date(pdsi$system.time_start, format = "%b %e, %Y"), "%Y"))
+pdsi.no2016 = subset(pdsi, year != 2016)
+pdsi.repeated<-(pdsi.no2016$pdsi)
+pdsi_matrix <- matrix(rep(pdsi.repeated, each = 286), ncol = length(pdsi.repeated))
+dim(pdsi_matrix)
+dim(data)
+#I've created the matrix since I need a pdsi value per pixel over time. 
+#Considering that PDSI has a value per year over that area, what I made was repeat the values in a matrix. 
+#########################
+# Initialize an empty list to store combined zoo objects
+combined_zoo <- list()
+all_values <- c()# Initialize an empty vector to store values
+data[] <- lapply(seq_along(data), function(i) {
+  x <- data[[i]]  # Extract the current column
+  # If the entire column is NA, replace it with the mean of the previous and next columns
+  if (all(is.na(x))) {
+    if (i > 1 & i < ncol(data)) {  
+      x[] <- rowMeans(cbind(data[[i - 1]], data[[i + 1]]), na.rm = TRUE)
+      print(x[])
+    } else if (i == 1) {  # If it's the first column, use only the next column
+      x[] <- data[[i + 1]]
+    } else if (i == ncol(data)) {  # If it's the last column, use only the previous column
+      x[] <- data[[i - 1]]
+    }
+  } else {
+    x[is.na(x)] <- mean(x, na.rm = TRUE)  # Replace individual NAs with the column mean
+  }
+  
+  return(x)
+})
+
+####################################################################
+#######################
+# Combine mesic and pdsi by row
+combined_data <- cbind(data, pdsi_matrix)  
+#  BSTS function
+xbsts <- function(data) {  
+  column_mesic <- data[1:64]
+  column_pdsi  <- data[65:128]
+  combined_zoo <- zoo(cbind(column_mesic, column_pdsi))
+  pre.period <- c(1, 32)
+  post.period <- c(33, 64)
+  impact <-   CausalImpact(combined_zoo, pre.period, post.period, model.args = list(nseasons = 4))
+  # Extract predicted values and point effects
+  predicted_values <- impact$series$point.pred
+  point_effects <- impact$series$point.effect
+  
+  dataf <- data.frame(predicted_values,point_effects)
+  return(dataf)  
+}
+
+bsts.output <- (apply(combined_data, 1, xbsts))  
+
+all_point_effects <- list()
+all_point_pred <- list()
+
+
+# Loop over each index (from 1 to 286)
+for (i in 1:286) {
+  point_effects <- bsts.output[[i]]$point_effects
+  point_pred<- bsts.output[[i]]$predicted_values
+  point_change <- bsts.output[[i]]$effect
+  all_point_effects[[i]] <- point_effects
+  all_point_pred[[i]] <- point_pred
+  
+}
+
+# Convert the list of point_effects into a data frame
+point_effects_matrix <- do.call(rbind, all_point_effects)
+point_pred_matrix <- do.call(rbind, all_point_pred)
+
+pred <- point_pred_matrix[,64]
+point_pred_matrix <- matrix(pred, nrow = nrow(ras.sort), ncol = ncol(ras.sort), byrow = TRUE)
+point_pred_raster <- rast(point_pred_matrix)
+ext(point_pred_raster) <- ext(ras.sort)
+crs(point_pred_raster) <- crs(ras.sort)
+
+effect <- point_effects_matrix[,64]
+point_effect_matrix <- matrix(effect, nrow = nrow(ras.sort), ncol = ncol(ras.sort), byrow = TRUE)
+point_effect_raster <- rast(point_effect_matrix)
+ext(point_effect_raster) <- ext(ras.sort)
+crs(point_effect_raster) <- crs(ras.sort)
+
+# Adjust margins to allow space for long titles
+par(mfrow = c(1, 3), mar = c(6, 4, 8, 2))  #
+
+# Plot the largest magnitude of change in trend
+plot(ras.sort[[64]], 
+     main = "A", ## Observed 202009
+     zlim = c(0, 0.6),  cex.main = 1)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+plot(point_pred_raster, 
+     main = "B",## Counterfactual 202009
+     zlim = c(0, 0.6),  cex.main = 1)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+plot(point_effect_raster, 
+     main = "C", ## Difference 
+     zlim = c(0, 0.6),
+     cex.main = 1)
+plot(st_geometry(aoi), border="black", lwd = 3, add=T)
+```
