@@ -440,7 +440,7 @@ BEAST pixels
 ###################################
 # Applying BEAST to a raster time series
 # Author: Carolyn Koehn
-# Last modified: 4/8/25
+# Last modified: 4/17/25
 ###################################
 
 # load packages
@@ -457,6 +457,14 @@ aoi <- st_read("yankee.shp") %>%
 
 ############################################
 # Data Preparation
+
+# add missing time steps
+missingTimes = rast(ras[[1:5]], vals = NA, names = c('1_1_040029_201907_mesic',
+                                                   '1_1_040029_201606_mesic',
+                                                   '1_1_040029_201607_mesic',
+                                                   '1_1_040029_201608_mesic',
+                                                   '1_1_040029_201609_mesic'))
+ras <- c(ras, missingTimes)
 
 # add time stamps to raster
 names = names(ras)
@@ -483,7 +491,7 @@ beast.output <- beast123(Y = array.input,
                                 period = "1 year"), # length of seasonal period (we expect a yearly cycle)
                          season = 'harmonic',
                          mcmc = list(seed = 101), # set seed for +/- reproducible results
-                         extra = list(dumpInputData = TRUE)) # return the data used by BEAST (the regular time series generated from our irregular time series) to illustrate what is occurring under the hood
+                         extra = list(dumpInputData = TRUE)) # return the data used by BEAST to illustrate what is occurring under the hood
 
 # irregular time series method
 beast.output.irreg <- beast123(Y = array.input,
@@ -501,10 +509,10 @@ beast.output.irreg <- beast123(Y = array.input,
 #############################################
 # Reading the output
 
-## Our data had 11 rows and 26 columns in the raster, with 63 time points
-## BEAST filled in our irregular time series, adding NAs for missing months
-## Here is an example of the time series generated for the top left pixel:
-print(beast.output$data[1,1,])
+## Our data had 11 columns and 26 rows in the raster, with 69 time points
+## BEAST can fill in an irregular time series, adding NAs for missing months
+## Here is an example of the time series generated for a pixel:
+print(beast.output$data[15,7,])
 
 ## see summary plot for one pixel
 plot(beast.output, index = c(15, 7))
@@ -536,7 +544,7 @@ plot(rast(beast.output$season$ncp_median,
 
 ## Probability of the median number of change points
 get_Pr_for_ncp <- function(ncpPr, ncp) {
-  return(ncp.Pr[[1]][ncp+1])
+  return(ncpPr[[1]][ncp+1])
 }
 
 ncpPr_trend_median <- matrix(data = mapply(FUN = get_Pr_for_ncp,
