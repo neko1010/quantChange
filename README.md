@@ -1,4 +1,4 @@
-# Repository for manuscript titled *Time series analyses provide a low-cost and scalable way to assess restoration outcomes from satellite data* #
+# Repository for manuscript titled *Time series analyses to demonstrate restoration outcomes and system change from satellite data* #
 
 sessionInfo() output:
 
